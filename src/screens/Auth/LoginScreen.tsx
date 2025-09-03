@@ -1,62 +1,75 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import GradientBg from '../../components/GradientBg';
 import AuthInput from '../../components/AuthInput';
-import Colors from '../../constants/Colors';
+import Toast from '../../components/Toast';
+import useToast from '../../hooks/useToast';
 import { login } from '../../services/auth';
-
 
 export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const { toast, showToast, hideToast } = useToast();
 
   const handleLogin = async () => {
-    if (!email || !password) return Alert.alert('Boş alan bırakmayın');
-    setLoading(true);
+    if (!email || !password) {
+      showToast('E-posta ve şifre boş bırakılamaz', 'error');
+      return;
+    }
+
     try {
       await login(email, password);
-      navigation.replace('Main'); // giriş başarılı ana sayfaya geç
+      showToast('Giriş yapıldı!', 'success');
+      setTimeout(() => navigation.replace('Main'), 1000);
     } catch (err: any) {
-      Alert.alert('Hata', err.message);
-    } finally {
-      setLoading(false);
+      const msgMap: Record<string, string> = {
+        'auth/invalid-credential': 'E-posta veya şifre hatalı.',
+        'auth/invalid-email': 'Geçersiz e-posta formatı.',
+        'auth/user-disabled': 'Hesap devre dışı bırakılmış.',
+        'auth/user-not-found': 'Böyle bir kullanıcı bulunamadı.',
+        'auth/wrong-password': 'Şifre yanlış.',
+        'auth/network-request-failed': 'İnternet bağlantınızı kontrol edin.',
+        'auth/too-many-requests': 'Çok fazla deneme. Lütfen biraz bekleyin.',
+        'auth/internal-error': 'Sunucu hatası. Daha sonra tekrar deneyin.',
+      };
+      const msg = msgMap[err.code] || err.message;
+      showToast(msg, 'error');
     }
   };
 
   return (
     <GradientBg>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.container}>
-          <Text style={styles.title}>Mindify</Text>
+      <View style={styles.container}>
+        <Text style={styles.title}>Mindify</Text>
 
-          <AuthInput label="E-posta" placeholder="ornek@mail.com" value={email} onChangeText={setEmail} />
-          <AuthInput label="Şifre" placeholder="••••••••" value={password} onChangeText={setPassword} secureTextEntry />
+        <AuthInput label="E-posta" placeholder="ornek@mail.com" value={email} onChangeText={setEmail} />
+        <AuthInput label="Şifre" placeholder="••••••••" value={password} onChangeText={setPassword} secureTextEntry />
 
-          <Text style={styles.button} onPress={handleLogin}>
-            {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
-          </Text>
+        <Text style={styles.loginBtn} onPress={handleLogin}>
+          Giriş Yap
+        </Text>
 
-          <Text style={styles.link} onPress={() => navigation.navigate('Register')}>
-            Üyeliğin yok mu? Hemen oluştur
-          </Text>
-        </View>
-      </TouchableWithoutFeedback>
+        <Text style={styles.link} onPress={() => navigation.navigate('Register')}>
+          Üyeliğin yok mu? Hemen oluştur
+        </Text>
+
+        {toast && <Toast {...toast} onHide={hideToast} />}
+      </View>
     </GradientBg>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
-  title: { fontSize: 40, color: Colors.white, fontWeight: 'bold', alignSelf: 'center', marginBottom: 40 },
-  button: {
-    backgroundColor: Colors.primary,
-    color: Colors.white,
+  title: { fontSize: 40, color: '#fff', fontWeight: 'bold', alignSelf: 'center', marginBottom: 40 },
+  loginBtn: {
+    backgroundColor: '#7A3E9D',
+    color: '#fff',
     textAlign: 'center',
     paddingVertical: 12,
     borderRadius: 8,
     marginTop: 12,
     fontSize: 16,
   },
-  link: { color: Colors.primaryLight, marginTop: 16, textAlign: 'center' },
+  link: { color: '#9B5FBF', marginTop: 16, textAlign: 'center' },
 });

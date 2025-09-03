@@ -6,6 +6,7 @@ import TopicListScreen from '../screens/Topics/TopicListScreen';
 import TestScreen from '../screens/Test/TestScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import Colors from '../constants/Colors';
+import useAutoLogout from '../hooks/useAutoLogout';
 
 export type TabParamList = {
   HomeTab: undefined;
@@ -17,6 +18,7 @@ export type TabParamList = {
 const Tab = createBottomTabNavigator<TabParamList>();
 
 export default function TabNavigator({ navigation }: any) {
+  useAutoLogout(() => navigation.replace('Login'));
 
   return (
     <Tab.Navigator
