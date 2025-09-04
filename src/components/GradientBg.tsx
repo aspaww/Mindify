@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '../constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function GradientBg({ children }: { children: React.ReactNode }) {
   return (
