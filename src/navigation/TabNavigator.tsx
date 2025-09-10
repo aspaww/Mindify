@@ -21,6 +21,7 @@ export default function TabNavigator({ navigation }: any) {
   useAutoLogout(() => navigation.replace('Login'));
 
   return (
+    // id="Tabs" SİLİNDİ
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,

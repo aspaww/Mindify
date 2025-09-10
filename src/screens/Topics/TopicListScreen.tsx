@@ -4,15 +4,20 @@ import GradientBg from '../../components/GradientBg';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import Colors from '../../constants/Colors';
-import { Ionicons } from '@expo/vector-icons';
+// --- DEĞİŞİKLİK 1: Yeni ikon paketini import et ---
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 
-// Cihazın ekranına göre üst boşluğu ayarlar (Dynamic Island/Notch için)
-const { height } = Dimensions.get('window');
-const TOP_SAFE_AREA = height > 800 ? 50 : 30;
+const { width } = Dimensions.get('window');
+const ITEM_WIDTH = (width - 48) / 2;
 
-// Ekranda gösterilecek her bir öğenin tipi
-type Item = { id: string; title: string; path: string; xp?: number };
-// Navigasyon yığınındaki her bir ekranın tipi
+type Item = { 
+  id: string; 
+  title: string; 
+  path: string; 
+  xp?: number; 
+  icon?: keyof typeof Icon.glyphMap; // Tipi yeni pakete göre güncelledik
+  color?: keyof typeof Colors;
+};
 type ScreenState = { headerTitle: string; collectionPath: string };
 
 export default function TopicListScreen() {
@@ -24,15 +29,16 @@ export default function TopicListScreen() {
     setLoading(true);
     const currentScreen = stack[stack.length - 1];
     
-    // Stack'ten alınan yola göre ilgili koleksiyonu dinle.
     const queryRef = collection(db, currentScreen.collectionPath);
 
     const unsubscribe = onSnapshot(queryRef, (snapshot) => {
       const docs = snapshot.docs.map((d) => ({
-        id: d.id, // Belgenin ID'si (YKS, TYT, Matematik...)
-        title: d.data().title ?? d.id, // Belgenin içindeki asıl başlık
+        id: d.id,
+        title: d.data().title ?? d.id,
         xp: d.data().xp,
-        path: currentScreen.collectionPath + '/' + d.id, // Bu, dokümanın kendi yoludur
+        icon: d.data().icon,
+        color: d.data().color,
+        path: currentScreen.collectionPath + '/' + d.id,
       }));
       setItems(docs);
       setLoading(false);
@@ -46,26 +52,21 @@ export default function TopicListScreen() {
   }, [stack]);
 
   const handlePress = (item: Item) => {
-    // Eğer 'xp' alanı varsa, bu bir nihai konudur, daha derine inme.
     if (item.xp !== undefined) {
       console.log('Seçilen Nihai Konu:', item.title, `(ID: ${item.id})`);
-      // Gelecekte burası: navigation.navigate('KonuDetay', { documentPath: item.path });
       return;
     }
 
-    // Bu bir kategori. Hiyerarşide bir sonraki seviyenin yolunu belirle.
-    // item.path -> topics/YKS (2 segment) -> depth = 1
-    // item.path -> topics/YKS/subCategories/TYT (4 segment) -> depth = 2
-    const depth = item.path.split('/').length / 2;
+    const pathSegments = item.path.split('/');
+    const depth = pathSegments.length / 2;
 
     let nextSubCollectionName = '';
-    if (depth === 1) nextSubCollectionName = 'subCategories'; // Sınav -> Alt Kategoriler
-    else if (depth === 2) nextSubCollectionName = 'subjects'; // Aşama -> Dersler
-    else if (depth === 3) nextSubCollectionName = 'konular';  // Ders -> Konular
+    if (depth === 1) nextSubCollectionName = 'subCategories';
+    else if (depth === 2) nextSubCollectionName = 'subjects';
+    else if (depth === 3) nextSubCollectionName = 'konular';
     
     if (nextSubCollectionName) {
       const newCollectionPath = item.path + '/' + nextSubCollectionName;
-      // Yeni ekranı yığına ekle. Başlık olarak belgenin içindeki "title" alanını kullan.
       setStack(s => [...s, { headerTitle: item.title, collectionPath: newCollectionPath }]);
     }
   };
@@ -80,12 +81,13 @@ export default function TopicListScreen() {
 
   return (
     <GradientBg>
-      <View style={{ height: TOP_SAFE_AREA }} />
+      <View style={styles.safeAreaTop} />
       <View style={styles.header}>
         <View style={styles.headerSide}>
           {stack.length > 1 && (
             <Pressable onPress={goBack} style={styles.backButton}>
-              <Ionicons name="chevron-back" size={24} color={Colors.primaryLight} />
+              {/* --- DEĞİŞİKLİK 2: İkonu güncelle --- */}
+              <Icon name="chevron-left" size={28} color={Colors.primaryLight} />
               <Text style={styles.backText}>Geri</Text>
             </Pressable>
           )}
@@ -98,20 +100,27 @@ export default function TopicListScreen() {
         <ActivityIndicator size="large" color={Colors.primaryLight} style={{ marginTop: 20 }}/>
       ) : (
         <FlatList
+          key={stack.length}
           data={items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <Pressable style={styles.card} onPress={() => handlePress(item)}>
-              {/* Butonun üzerinde belgenin ID'si (YKS, TYT gibi) yazacak */}
-              <Text style={styles.cardText}>{item.id}</Text> 
-              {item.xp === undefined ? (
-                <Ionicons name="chevron-forward" size={20} color={Colors.grey} />
-              ) : (
-                <Text style={styles.xp}>+{item.xp} XP</Text>
-              )}
-            </Pressable>
-          )}
-          contentContainerStyle={styles.listContent}
+          numColumns={2}
+          renderItem={({ item }) => {
+            const itemColor = Colors[item.color] || Colors.primaryLight;
+            return (
+              <Pressable 
+                style={({ pressed }) => [styles.gridCard, pressed && styles.gridCardPressed]} 
+                onPress={() => handlePress(item)}
+              >
+                <View style={[styles.gridIconContainer, { backgroundColor: `${itemColor}33` }]}>
+                  {/* --- DEĞİŞİKLİK 3: İkonu güncelle --- */}
+                  <Icon name={item.icon || 'folder-open-outline'} size={40} color={itemColor} />
+                </View>
+                <Text style={styles.gridCardText} numberOfLines={2}>{item.title}</Text>
+                {item.xp !== undefined && <Text style={styles.xpText}>+{item.xp} XP</Text>}
+              </Pressable>
+            )
+          }}
+          columnWrapperStyle={{ justifyContent: 'center' }}
+          contentContainerStyle={styles.gridListContent}
           ListEmptyComponent={<Text style={styles.emptyText}>Bu kategori altında henüz içerik yok.</Text>}
         />
       )}
@@ -120,14 +129,53 @@ export default function TopicListScreen() {
 }
 
 const styles = StyleSheet.create({
+  safeAreaTop: { height: Dimensions.get('window').height > 800 ? 50 : 30 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 10 },
   headerSide: { flex: 1 },
   backButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
-  backText: { color: Colors.primaryLight, fontSize: 16, marginLeft: 4 },
+  backText: { color: Colors.primaryLight, fontSize: 16, marginLeft: 2 },
   title: { flex: 2, fontSize: 22, color: Colors.white, fontWeight: 'bold', textAlign: 'center' },
-  card: { backgroundColor: Colors.dark2, padding: 20, borderRadius: 16, marginBottom: 12, marginHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardText: { color: Colors.white, fontSize: 18 },
-  xp: { color: Colors.warning, fontSize: 14, fontWeight: 'bold' },
-  listContent: { paddingTop: 10, paddingBottom: 40 },
+  gridListContent: { 
+    paddingTop: 10, 
+    paddingBottom: 40,
+  },
+  gridCard: {
+    backgroundColor: Colors.dark2,
+    width: ITEM_WIDTH,
+    height: ITEM_WIDTH,
+    borderRadius: 20,
+    margin: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 10,
+  },
+  gridCardPressed: {
+    transform: [{ scale: 0.96 }],
+    backgroundColor: Colors.dark3,
+  },
+  gridIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  gridCardText: { 
+    color: Colors.white, 
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  xpText: {
+    position: 'absolute',
+    bottom: 10,
+    color: Colors.warning,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   emptyText: { color: Colors.grey, textAlign: 'center', marginTop: 50, fontSize: 16 }
 });
