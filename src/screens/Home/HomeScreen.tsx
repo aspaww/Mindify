@@ -20,83 +20,139 @@ interface UserStats {
   lastActive: Timestamp | null;
 }
 type HomeScreenNavigationProp = BottomTabNavigationProp<TabParamList, 'HomeTab'>;
+
+// --- YARDIMCI FONKSİYONLAR ---
 const isSameDay = (d1, d2) => d1 && d2 && d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 const isYesterday = (d1, d2) => { const y = new Date(d2); y.setDate(y.getDate() - 1); return isSameDay(d1, y); };
+const areDatesInSameWeek = (d1, d2) => {
+  if (!d1 || !d2) return false;
+  const getMonday = (date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(d.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  };
+  return getMonday(d1).getTime() === getMonday(d2).getTime();
+};
+
 
 export default function HomeScreen() {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const flameAnimation = useRef(new Animated.Value(1)).current;
+  const unsubscribeSnapshotRef = useRef(null);
 
   useEffect(() => {
-    console.log("--- [ADIM 1] HomeScreen yüklendi. Kullanıcı girişi dinleniyor... ---");
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (unsubscribeSnapshotRef.current) {
+        unsubscribeSnapshotRef.current();
+        unsubscribeSnapshotRef.current = null;
+      }
+
       if (user) {
-        console.log(`--- [ADIM 2] Kullanıcı GİRİŞ YAPTI. UID: ${user.uid} ---`);
         const statsRef = doc(db, 'users', user.uid, 'stats', 'data');
         
-        const unsubscribeSnapshot = onSnapshot(statsRef, (docSnap) => {
+        unsubscribeSnapshotRef.current = onSnapshot(statsRef, (docSnap) => {
+          if (docSnap.metadata.hasPendingWrites) {
+            return;
+          }
+
           if (docSnap.exists()) {
-            console.log("--- [ADIM 3A] Kullanıcının 'stats' verisi bulundu. Döngüyü kıran kontrol fonksiyonu çağrılıyor... ---");
             const data = docSnap.data() as UserStats;
-            setStats(data); // Önce arayüzü anında güncelle
-            checkAndUpdateStats(statsRef, data);
+            setStats(data);
+            // SADECE MEVCUT KULLANICILAR İÇİN ÇALIŞACAK DÖNGÜ KIRMA VE GÜNCELLEME
+            // YENİ KULLANICI İÇİN GEREKLİ GÜNCELLEME AŞAĞIDA, ELSE BLOĞUNDA YAPILIYOR
+            const today = new Date();
+            const lastActiveDate = data.lastActive?.toDate();
+            if (lastActiveDate && isSameDay(lastActiveDate, today)) {
+              setLoading(false);
+            } else if (lastActiveDate !== null) { // Mevcut ama günü geçmiş kullanıcı
+              checkAndUpdateStats(statsRef, data);
+            }
+            // Yeni kullanıcı (`lastActive: null`) ise hiçbir şey yapma,
+            // çünkü onun güncellemesi zaten aşağıda `setDoc.then` ile yapıldı.
+            // Sadece yüklemeyi bitir.
+            else {
+              setLoading(false);
+            }
+
           } else {
-            console.log("--- [ADIM 3B] BU YENİ BİR KULLANICI! 'stats' verisi bulunamadı. Varsayılan veri OLUŞTURULUYOR... ---");
+            // --- YENİ MANTIĞIN TAMAMI BURADA ---
+            console.log("--- [DURUM] Veri bulunamadı. Yeni kullanıcı için akış başlatılıyor... ---");
             const defaultStats: UserStats = {
-              level: 0,
-              streak: 0,
-              xpToday: 0,
+              level: 0, streak: 0, xpToday: 0,
               weeklyLog: [false, false, false, false, false, false, false],
               lastActive: null,
             };
-            setDoc(statsRef, defaultStats);
-            // onSnapshot bu yeni veriyi yakalayıp yukarıdaki if'e girecek.
-          }
-        });
+            
+            // 1. Önce arayüzü hazırla ve yüklemeyi bitir
+            setStats(defaultStats);
+            setLoading(false);
 
-        return () => unsubscribeSnapshot();
+            // 2. Varsayılan veriyi oluştur, BİTTİĞİNDE ise ilk gün güncellemesini yap
+            setDoc(statsRef, defaultStats).then(() => {
+                console.log("--- BAŞARI: setDoc (ilk kayıt) başarılı. Şimdi ilk gün güncellemesi tetikleniyor... ---");
+                
+                const todayIndex = (new Date().getDay() + 6) % 7;
+                const initialWeeklyLog = [false, false, false, false, false, false, false];
+                initialWeeklyLog[todayIndex] = true;
+
+                // Bu güncelleme, dinleyici tarafından yakalanacak ve arayüzü (streak: 1) olarak güncelleyecek.
+                updateDoc(statsRef, {
+                    streak: 1,
+                    weeklyLog: initialWeeklyLog,
+                    lastActive: serverTimestamp()
+                });
+            }).catch(e => console.error("--- HATA: Yeni kullanıcı oluşturma akışında hata:", e));
+          }
+        }, (error) => {
+            console.error("--- HATA: Firestore dinleme hatası:", error);
+        });
       } else {
-        console.log("--- [ADIM 2B] Kullanıcı ÇIKIŞ YAPMIŞ. Login ekranına yönlendiriliyor... ---");
         navigation.dispatch(StackActions.replace('Login'));
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeSnapshotRef.current) {
+        unsubscribeSnapshotRef.current();
+      }
+    };
   }, []);
 
-  // --- DÖNGÜYÜ KIRAN FONKSİYON ---
+  // Bu fonksiyon artık sadece günü geçmiş mevcut kullanıcılar için
   const checkAndUpdateStats = async (statsRef, currentStats: UserStats) => {
-    console.log("--- [ADIM 5] 'checkAndUpdateStats' fonksiyonu çalıştı. Streak ve hafta kontrolü yapılıyor... ---");
+    console.log("--- [ADIM 5] 'checkAndUpdateStats' (mevcut kullanıcı için) çalıştı. ---");
     const today = new Date();
     const lastActiveDate = currentStats.lastActive?.toDate();
-    
-    // SADECE VE SADECE kullanıcı bugün daha önce GİRMEMİŞSE bu blok çalışır.
-    if (!lastActiveDate || !isSameDay(lastActiveDate, today)) {
-        console.log("--- [ADIM 6A] Kullanıcı bugün ilk kez giriş yapıyor. Veri güncellenecek. ---");
-        const todayIndex = (today.getDay() + 6) % 7;
-        const newWeeklyLog = [...currentStats.weeklyLog];
-        newWeeklyLog[todayIndex] = true;
-
-        const newStreak = (lastActiveDate && isYesterday(lastActiveDate, today)) ? currentStats.streak + 1 : 1;
         
-        // Veritabanını SADECE BİR KERE güncelle. Bu, döngüyü kırar.
-        await updateDoc(statsRef, {
-            streak: newStreak,
-            weeklyLog: newWeeklyLog,
-            lastActive: serverTimestamp(),
-        });
-        console.log("--- [ADIM 7] Streak ve hafta bilgisi Firestore'da güncellendi. onSnapshot bunu algılayacak ama bir sonraki kontrolde 6B'ye girecek. ---");
+    let newWeeklyLog;
+    if (lastActiveDate && areDatesInSameWeek(lastActiveDate, today)) {
+      newWeeklyLog = [...currentStats.weeklyLog];
     } else {
-        console.log("--- [ADIM 6B] Kullanıcı bugün zaten giriş yapmış. Veri güncellenmeyecek. DÖNGÜ KIRILDI. ---");
+      newWeeklyLog = [false, false, false, false, false, false, false];
     }
-    // Her durumda (güncelleme olsa da olmasa da) yüklemeyi bitir.
-    setLoading(false);
-    console.log("--- [ADIM 8] Yüklenme tamamlandı. Arayüz gösteriliyor. ---");
+
+    const todayIndex = (today.getDay() + 6) % 7;
+    newWeeklyLog[todayIndex] = true;
+
+    const newStreak = (lastActiveDate && isYesterday(lastActiveDate, today)) ? currentStats.streak + 1 : 1;
+    
+    await updateDoc(statsRef, {
+        streak: newStreak,
+        weeklyLog: newWeeklyLog,
+        lastActive: serverTimestamp(),
+    });
+
+    // Bu güncelleme zaten dinleyici tarafından yakalanacağı için burada setLoading'e gerek yok.
+    console.log("--- [ADIM 7] Veritabanı (mevcut kullanıcı için) güncellendi. ---");
   };
   
-  // Animasyon...
+  // Geri kalan her şey aynı...
   useEffect(() => {
     if (stats && stats.streak > 0) {
       Animated.loop(
@@ -115,7 +171,6 @@ export default function HomeScreen() {
     return <GradientBg><SafeAreaView style={styles.safeArea}><Text style={styles.headerTitle}>Kullanıcı verisi bulunamadı.</Text></SafeAreaView></GradientBg>;
   }
 
-  // JSX...
   const getFlameStyle = () => {
     let color = Colors.grey;
     let size = 20;
@@ -176,7 +231,6 @@ export default function HomeScreen() {
   );
 }
 
-// Stiller...
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   container: { paddingHorizontal: 20, paddingBottom: 30 },
