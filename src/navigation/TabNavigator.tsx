@@ -6,23 +6,17 @@ import TopicListScreen from '../screens/Topics/TopicListScreen';
 import TestScreen from '../screens/Test/TestScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import Colors from '../constants/Colors';
-import useAutoLogout from '../hooks/useAutoLogout';
-
-export type TabParamList = {
-  HomeTab: undefined;
-  TopicsTab: undefined;
-  TestTab: undefined;
-  ProfileTab: undefined;
-};
+import { TabParamList } from './types'; // Artık tipleri buradan alıyoruz
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
-export default function TabNavigator({ navigation }: any) {
-  useAutoLogout(() => navigation.replace('Login'));
+export default function TabNavigator() {
+  // useAutoLogout hook'unu şimdilik devre dışı bırakalım ki sorunun ondan olmadığından emin olalım
+  // useAutoLogout(() => navigation.replace('Login'));
 
   return (
-    // id="Tabs" SİLİNDİ
     <Tab.Navigator
+      id="RootBottomTab" // En güncel versiyonlar bu ID'yi bekler
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: Colors.primary,
