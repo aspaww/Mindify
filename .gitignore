@@ -36,5 +36,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# Firebase secrets
+# --- Firebase Güvenlik Sırları ---
+# Gerçek Firebase bağlantı bilgilerini içeren dosya
 src/services/firebase.ts
+
+# Firebase Admin servis anahtarı (.json dosyası)
+# Sonu "-firebase-adminsdk.json" ile biten tüm dosyaları yok say.
+*-firebase-adminsdk.json
