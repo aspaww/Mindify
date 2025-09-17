@@ -4,18 +4,29 @@ import GradientBg from '../../components/GradientBg';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import Colors from '../../constants/Colors';
-// --- DEĞİŞİKLİK 1: Yeni ikon paketini import et ---
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+// --- YENİ 1: Navigasyon için gerekli modülleri import et ---
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 
 const { width } = Dimensions.get('window');
 const ITEM_WIDTH = (width - 48) / 2;
+
+// --- YENİ 2: Navigasyon Stack'imizin tip tanımını yapalım ---
+// Bu, hangi ekrana ne tür veri göndereceğimizi belirler.
+type RootStackParamList = {
+  TopicList: undefined; // Bu ekranın kendisi
+  TopicDetail: { topicId: string; topicTitle: string; topicPath: string }; // Gideceğimiz yeni ekran
+};
+
+type TopicListNavigationProp = StackNavigationProp<RootStackParamList, 'TopicList'>;
 
 type Item = { 
   id: string; 
   title: string; 
   path: string; 
-  xp?: number; 
-  icon?: keyof typeof Icon.glyphMap; // Tipi yeni pakete göre güncelledik
+  contentXp?: number; // Artık 'xp' değil, 'contentXp' veya 'storyXp' olabilir
+  icon?: keyof typeof Icon.glyphMap;
   color?: keyof typeof Colors;
 };
 type ScreenState = { headerTitle: string; collectionPath: string };
@@ -24,6 +35,8 @@ export default function TopicListScreen() {
   const [stack, setStack] = useState<ScreenState[]>([{ headerTitle: 'Sınavlar', collectionPath: 'topics' }]);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
+  // --- YENİ 3: Navigation hook'unu aktif et ---
+  const navigation = useNavigation<TopicListNavigationProp>();
 
   useEffect(() => {
     setLoading(true);
@@ -35,7 +48,7 @@ export default function TopicListScreen() {
       const docs = snapshot.docs.map((d) => ({
         id: d.id,
         title: d.data().title ?? d.id,
-        xp: d.data().xp,
+        contentXp: d.data().contentXp, // Veritabanındaki yeni isme göre güncelle
         icon: d.data().icon,
         color: d.data().color,
         path: currentScreen.collectionPath + '/' + d.id,
@@ -51,15 +64,24 @@ export default function TopicListScreen() {
     return () => unsubscribe();
   }, [stack]);
 
+  // --- DEĞİŞİKLİK: handlePress fonksiyonunu akıllandırdık ---
   const handlePress = (item: Item) => {
-    if (item.xp !== undefined) {
-      console.log('Seçilen Nihai Konu:', item.title, `(ID: ${item.id})`);
+    const pathSegments = item.path.split('/');
+    const currentCollectionName = pathSegments[pathSegments.length - 2];
+
+    // Eğer tıklanan öğe "konular" koleksiyonunun içindeyse, bu nihai bir konudur.
+    if (currentCollectionName === 'konular') {
+      console.log(`--- NAVIGASYON: TopicDetail ekranına yönlendiriliyor. Konu ID: ${item.id}, Başlık: ${item.title}`);
+      navigation.navigate('TopicDetail', {
+        topicId: item.id,
+        topicTitle: item.title,
+        topicPath: item.path,
+      });
       return;
     }
 
-    const pathSegments = item.path.split('/');
+    // Eğer bir kategori ise, daha derine inmeye devam et (eski mantık).
     const depth = pathSegments.length / 2;
-
     let nextSubCollectionName = '';
     if (depth === 1) nextSubCollectionName = 'subCategories';
     else if (depth === 2) nextSubCollectionName = 'subjects';
@@ -67,6 +89,7 @@ export default function TopicListScreen() {
     
     if (nextSubCollectionName) {
       const newCollectionPath = item.path + '/' + nextSubCollectionName;
+      console.log(`--- NAVIGASYON: Bir alt kategoriye iniliyor. Yeni yol: ${newCollectionPath}`);
       setStack(s => [...s, { headerTitle: item.title, collectionPath: newCollectionPath }]);
     }
   };
@@ -86,7 +109,6 @@ export default function TopicListScreen() {
         <View style={styles.headerSide}>
           {stack.length > 1 && (
             <Pressable onPress={goBack} style={styles.backButton}>
-              {/* --- DEĞİŞİKLİK 2: İkonu güncelle --- */}
               <Icon name="chevron-left" size={28} color={Colors.primaryLight} />
               <Text style={styles.backText}>Geri</Text>
             </Pressable>
@@ -111,11 +133,10 @@ export default function TopicListScreen() {
                 onPress={() => handlePress(item)}
               >
                 <View style={[styles.gridIconContainer, { backgroundColor: `${itemColor}33` }]}>
-                  {/* --- DEĞİŞİKLİK 3: İkonu güncelle --- */}
                   <Icon name={item.icon || 'folder-open-outline'} size={40} color={itemColor} />
                 </View>
                 <Text style={styles.gridCardText} numberOfLines={2}>{item.title}</Text>
-                {item.xp !== undefined && <Text style={styles.xpText}>+{item.xp} XP</Text>}
+                {/* Şimdilik XP metnini kaldırıyoruz, çünkü XP artık detay ekranında kazanılacak */}
               </Pressable>
             )
           }}
@@ -135,10 +156,7 @@ const styles = StyleSheet.create({
   backButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
   backText: { color: Colors.primaryLight, fontSize: 16, marginLeft: 2 },
   title: { flex: 2, fontSize: 22, color: Colors.white, fontWeight: 'bold', textAlign: 'center' },
-  gridListContent: { 
-    paddingTop: 10, 
-    paddingBottom: 40,
-  },
+  gridListContent: { paddingTop: 10, paddingBottom: 40 },
   gridCard: {
     backgroundColor: Colors.dark2,
     width: ITEM_WIDTH,
@@ -169,13 +187,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 5,
-  },
-  xpText: {
-    position: 'absolute',
-    bottom: 10,
-    color: Colors.warning,
-    fontSize: 12,
-    fontWeight: 'bold',
   },
   emptyText: { color: Colors.grey, textAlign: 'center', marginTop: 50, fontSize: 16 }
 });

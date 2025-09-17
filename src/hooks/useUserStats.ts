@@ -1,22 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { useNavigation } from '@react-navigation/native';
-import { StackActions } from '@react-navigation/native';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native'; // <-- Sihirli kancayı import et
+import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp, Timestamp, increment, arrayUnion } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
+import { UserStats } from '../context/StatsContext';
 
-// Veri Yapısı
-interface UserStats {
-  streak: number;
-  xpToday: number;
-  weeklyXp: number;
-  totalXp: number;
-  weeklyLog: boolean[];
-  lastActive: Timestamp | null;
-  completedToday: string[];
-}
-
-// Yardımcı Fonksiyonlar
 const isSameDay = (d1, d2) => d1 && d2 && d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 const isYesterday = (d1, d2) => { const y = new Date(d2); y.setDate(y.getDate() - 1); return isSameDay(d1, y); };
 const areDatesInSameWeek = (d1, d2) => {
@@ -37,72 +24,48 @@ const calculateMultiplier = (streak: number) => {
   return Math.min(multiplier, 2.0);
 };
 
-// İşte "Beyin" dediğimiz Custom Hook
 export default function useUserStats() {
-  const navigation = useNavigation();
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const isUpdating = useRef(false);
 
-  useEffect(() => {
-    let unsubscribeSnapshot: (() => void) | null = null;
-
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (unsubscribeSnapshot) unsubscribeSnapshot();
+  // --- DEĞİŞİKLİK: useEffect yerine useFocusEffect kullanıyoruz ---
+  useFocusEffect(
+    useCallback(() => {
+      const user = auth.currentUser;
       if (!user) {
-        setStats(null);
-        setLoading(true);
-        navigation.dispatch(StackActions.replace('Login'));
+        setLoading(false);
         return;
       }
 
+      console.log("--- [HOOK] Ekran odaklandı, veri dinleyicisi aktif. ---");
       const statsRef = doc(db, 'users', user.uid, 'stats', 'data');
-      unsubscribeSnapshot = onSnapshot(statsRef, (docSnap) => {
-
-        if (docSnap.metadata.hasPendingWrites) {
-          console.log("--- [FİLTRE] Yankı algılandı, atlanıyor.");
-          return;
-        }
+      const unsubscribe = onSnapshot(statsRef, (docSnap) => {
+        if (docSnap.metadata.hasPendingWrites) { return; }
 
         if (!docSnap.exists()) {
           if (isUpdating.current) return;
-          console.log("--- [YENİ KULLANICI] Kayıt bulunamadı, oluşturma ve güncelleme akışı başlıyor...");
           isUpdating.current = true;
-          
           const defaultStats: UserStats = {
             streak: 0, xpToday: 0, weeklyXp: 0, totalXp: 0,
             weeklyLog: [false, false, false, false, false, false, false],
             lastActive: null, completedToday: [],
           };
-          
-          setStats(defaultStats);
-          setLoading(false);
-
           setDoc(statsRef, defaultStats).then(() => {
-            console.log("--- [YENİ KULLANICI] Adım 1: Varsayılan kayıt oluşturuldu.");
             const todayIndex = (new Date().getDay() + 6) % 7;
             const initialWeeklyLog = [false, false, false, false, false, false, false];
             initialWeeklyLog[todayIndex] = true;
             const initialXp = 50;
-
-            console.log("--- [YENİ KULLANICI] Adım 2: İlk gün bonusu veriliyor...");
             updateDoc(statsRef, {
-                streak: 1,
-                weeklyLog: initialWeeklyLog,
-                lastActive: serverTimestamp(),
-                xpToday: initialXp,
-                weeklyXp: initialXp,
-                totalXp: initialXp,
+                streak: 1, weeklyLog: initialWeeklyLog, lastActive: serverTimestamp(),
+                xpToday: initialXp, weeklyXp: initialXp, totalXp: initialXp,
                 completedToday: ["dailyLogin"]
-            }).finally(() => {
-              isUpdating.current = false;
-            });
+            }).finally(() => { isUpdating.current = false; });
           });
           return;
         }
 
         const currentStats = docSnap.data() as UserStats;
-        console.log("--- [VERİ GELDİ] Arayüz güncelleniyor. Mevcut Streak:", currentStats.streak);
         setStats(currentStats);
         setLoading(false);
 
@@ -111,8 +74,6 @@ export default function useUserStats() {
 
         if ((!lastActiveDate || !isSameDay(lastActiveDate, today)) && !isUpdating.current) {
           isUpdating.current = true;
-          console.log("--- [GÜNCELLEME] Yeni gün tespit edildi, güncelleme başlıyor...");
-          
           const updatePayload: any = { lastActive: serverTimestamp() };
           const streak = currentStats.streak || 0;
           
@@ -131,22 +92,21 @@ export default function useUserStats() {
           updatePayload.streak = (lastActiveDate && isYesterday(lastActiveDate, today)) ? streak + 1 : 1;
           
           const todayIndex = (today.getDay() + 6) % 7;
-          const newWeeklyLog = updatePayload.weeklyXp === 0
-              ? [false, false, false, false, false, false, false]
-              : [...(currentStats.weeklyLog || [false,false,false,false,false,false,false])];
+          const newWeeklyLog = updatePayload.weeklyXp === 0 ? [false,false,false,false,false,false,false] : [...(currentStats.weeklyLog || [false,false,false,false,false,false,false])];
           newWeeklyLog[todayIndex] = true;
           updatePayload.weeklyLog = newWeeklyLog;
 
-          console.log("--- [GÜNCELLEME] Payload:", updatePayload);
-          updateDoc(statsRef, updatePayload).finally(() => {
-            isUpdating.current = false;
-          });
+          updateDoc(statsRef, updatePayload).finally(() => { isUpdating.current = false; });
         }
       });
-    });
 
-    return () => unsubscribeAuth();
-  }, [navigation]); // navigation'ı dependency array'e ekliyoruz.
+      // Ekran odaktan çıktığında dinleyiciyi temizle
+      return () => {
+        console.log("--- [HOOK] Ekran odaktan çıktı, dinleyici temizleniyor. ---");
+        unsubscribe();
+      };
+    }, [])
+  );
 
   return { stats, loading };
 }
